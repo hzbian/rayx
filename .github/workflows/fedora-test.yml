@@ -23,13 +23,10 @@ jobs:
       # ------------------------------------------------------------------
       # FEDORA SECTION (container-based)
       # ------------------------------------------------------------------
-      - name: Install build deps (Fedora)
+      - name: Install git (Fedora)
         if: matrix.label == 'fedora'
         run: |
-          dnf install -y git cmake gcc gcc-c++ make ninja-build \
-            dbus-devel gtk3-devel \
-            hdf5 hdf5-devel \
-            vulkan-loader vulkan-headers
+          dnf install -y git
 
       # ------------------------------------------------------------------
       # Standard checkout (works in bare Linux + Windows + Fedora container)
@@ -43,3 +40,104 @@ jobs:
         if: matrix.label == 'fedora'
         run: |
           echo "FEDORA_VERSION=$(rpm -E %fedora)"
+
+      # ==========================================================
+      # FEDORA (container-based) SECTION
+      # ==========================================================
+      - name: Install build deps (Fedora)
+        if: matrix.label == 'fedora'
+        run: |
+          dnf install -y git cmake gcc gcc-c++ make ninja-build \
+            dbus-devel gtk3-devel \
+            hdf5 hdf5-devel \
+            vulkan-loader vulkan-headers
+
+      - name: Detect Fedora version
+        if: matrix.label == 'fedora'
+        run: echo "FEDORA_VERSION=$(rpm -E %fedora)" >> $GITHUB_ENV
+
+      - name: Configure CMake (Fedora)
+        if: matrix.label == 'fedora'
+        run: cmake -B build -DRAYX_WERROR=ON -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
+                     -DRAYX_REQUIRE_OPENMP=ON -DCMAKE_INSTALL_PREFIX=install
+
+
+      # ==========================================================
+      # COMMON BUILD AND TEST
+      # ==========================================================
+      - name: Build
+        run: cmake --build build --config ${{ matrix.build-type }}
+
+      - name: Test
+        working-directory: build/bin/release
+        run: ./rayx-core-tst -x
+
+      # ==========================================================
+      # PACKAGING
+      # ==========================================================
+
+      # --- Fedora ---
+      - name: Generate RPM and TGZ (Fedora)
+        if: matrix.label == 'fedora'
+        working-directory: build
+        run: |
+          cpack -G RPM
+          cpack -G TGZ
+
+          # rename RPM with fedora version
+          for f in RAYX-*.rpm; do
+            mv "$f" "${f%.rpm}.fedora${FEDORA_VERSION}.rpm"
+          done
+
+      # Upload artifacts
+      - name: Upload artifacts (Fedora)
+        if: matrix.label == 'fedora'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fedora-artifacts
+          path: |
+            build/RAYX-*.rpm
+            build/RAYX-*.tar.gz
+
+      # Source code archive
+      - name: Extract version from tag
+        id: get_version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+
+      - name: Archive source code
+        run: |
+          git archive HEAD --format=zip --output=build/RAYX-source-v${{env.version}}.zip
+
+  # ==============================================================
+  # RELEASE JOB
+  # ==============================================================
+  release:
+    name: Create Release
+    needs: build-and-release
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: CHANGELOG.md
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Extract version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          body_path: CHANGELOG.md
+          files: |
+            artifacts/windows-artifacts/*
+            artifacts/ubuntu-artifacts/*
+            artifacts/fedora-artifacts/*
+            artifacts/*/RAYX-source-v${{env.version}}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

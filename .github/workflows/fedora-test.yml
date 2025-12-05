@@ -50,7 +50,8 @@ jobs:
           dnf install -y git cmake gcc gcc-c++ make ninja-build \
             dbus-devel gtk3-devel \
             hdf5 hdf5-devel \
-            vulkan-loader vulkan-headers
+            vulkan-loader vulkan-headers \
+            rpm-build
 
       - name: Detect Fedora version
         if: matrix.label == 'fedora'

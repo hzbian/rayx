@@ -4,29 +4,42 @@ on:
   workflow_dispatch:
 
 jobs:
-  fedora-test:
-    name: Fedora dnf Test
-    runs-on: ubuntu-latest
+  build-and-release:
+    name: Build and Release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
 
-    # Run inside a Fedora container
-    container: fedora:latest
+          # ----------------------
+          # Fedora build (RPM + TGZ)
+          # ----------------------
+          - os: ubuntu-latest        # GitHub runners for containers must be Ubuntu
+            container: fedora:latest
+            build-type: Release
+            label: fedora
 
     steps:
-      - name: Show Fedora version
+      # ------------------------------------------------------------------
+      # Standard checkout (works in bare Linux + Windows + Fedora container)
+      # ------------------------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # ------------------------------------------------------------------
+      # FEDORA SECTION (container-based)
+      # ------------------------------------------------------------------
+      - name: Install build deps (Fedora)
+        if: matrix.label == 'fedora'
         run: |
-          rpm -E %fedora
-          cat /etc/os-release
+          dnf install -y git cmake gcc gcc-c++ make ninja-build \
+            dbus-devel gtk3-devel \
+            hdf5 hdf5-devel \
+            vulkan-loader vulkan-headers
 
-      - name: Update package metadata
-        run: dnf makecache --refresh -y
-
-      - name: Install git with dnf
-        run: dnf install -y git
-
-      - name: Verify git works
+      - name: Detect Fedora version
+        if: matrix.label == 'fedora'
         run: |
-          git --version
-          which git
-
-      - name: Print success message
-        run: echo "Fedora container + dnf + git installation works!"
+          echo "FEDORA_VERSION=$(rpm -E %fedora)"

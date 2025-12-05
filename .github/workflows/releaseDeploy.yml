@@ -4,41 +4,48 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
 
 jobs:
   build-and-release:
     name: Build and Release
     runs-on: ${{ matrix.os }}
-    container: ${{ matrix.container || '' }}
-
     strategy:
       matrix:
         include:
+          # ----------------------
+          # Windows (unchanged)
+          # ----------------------
           - os: windows-2025
             build-type: Release
+            label: windows
 
+          # ----------------------
+          # Ubuntu build (DEB + TGZ)
+          # ----------------------
           - os: ubuntu-24.04
             build-type: Release
+            label: ubuntu
 
-          - os: ubuntu-latest
+          # ----------------------
+          # Fedora build (RPM + TGZ)
+          # ----------------------
+          - os: ubuntu-latest        # GitHub runners for containers must be Ubuntu
             container: fedora:latest
             build-type: Release
             label: fedora
 
     steps:
-      # ==========================================
-      # Shared steps
-      # ==========================================
+      # ------------------------------------------------------------------
+      # Standard checkout (works in bare Linux + Windows + Fedora container)
+      # ------------------------------------------------------------------
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-      - name: Update all submodules
-        run: |
-          git submodule sync
-          git submodule update --init --recursive
-
-      # Vulkan dependencies (shared)
+      # ------------------------------------------------------------------
+      # Prepare environment (Vulkan SDK)
+      # ------------------------------------------------------------------
       - name: Prepare environment
         uses: humbletim/setup-vulkan-sdk@v1.2.1
         with:
@@ -46,11 +53,11 @@ jobs:
           vulkan-components: Vulkan-Headers, Vulkan-Loader, SPIRV-Tools, Glslang
           vulkan-use-cache: true
 
-      # ==========================================
-      # WINDOWS BUILD
-      # ==========================================
+      # ------------------------------------------------------------------
+      # WINDOWS SECTION
+      # ------------------------------------------------------------------
       - name: Install dependencies (Windows)
-        if: matrix.os == 'windows-2025'
+        if: matrix.label == 'windows'
         run: |
           vcpkg install hdf5 --triplet x64-windows
           vcpkg integrate install
@@ -58,34 +65,32 @@ jobs:
         shell: powershell
 
       - name: Install NSIS (Windows)
-        if: matrix.os == 'windows-2025'
+        if: matrix.label == 'windows'
         run: choco install nsis -y
 
-      - name: Setup CUDA Toolkit
-        if: matrix.os == 'windows-2025'
+      - name: Setup CUDA Toolkit (Windows)
+        if: matrix.label == 'windows'
         id: cuda-toolkit
         shell: pwsh
         run: .\Scripts\setup-cuda.ps1
         env:
-          INPUT_CUDA_VERSION: 12.9.1
+            INPUT_CUDA_VERSION: 12.9.1
 
       - name: Configure CMake (Windows)
-        if: matrix.os == 'windows-2025'
-        run: cmake -B build -DRAYX_WERROR=ON -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
-             -DRAYX_REQUIRE_CUDA=ON -DRAYX_REQUIRE_OPENMP=ON \
-             -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/install
+        if: matrix.label == 'windows'
+        run: cmake -B build -DRAYX_WERROR=ON -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} -DRAYX_REQUIRE_CUDA=ON -DRAYX_REQUIRE_OPENMP=ON -DCMAKE_INSTALL_PREFIX=install
 
-      # ==========================================
-      # UBUNTU BUILD (DEB + TGZ only!)
-      # ==========================================
+      # ------------------------------------------------------------------
+      # UBUNTU SECTION
+      # ------------------------------------------------------------------
       - name: Install dependencies (Ubuntu)
-        if: matrix.os == 'ubuntu-24.04'
+        if: matrix.label == 'ubuntu'
         run: |
           sudo apt update --yes
           sudo apt install --yes xorg-dev cmake libgtk-3-dev libdbus-1-dev libhdf5-dev
 
-      - name: Install Cuda (Ubuntu)
-        if: matrix.os == 'ubuntu-24.04'
+      - name: Install CUDA Toolkit (Ubuntu)
+        if: matrix.label == 'ubuntu'
         uses: Jimver/cuda-toolkit@master
         id: cuda-toolkit-ubuntu
         with:
@@ -93,39 +98,32 @@ jobs:
           method: 'network'
 
       - name: Configure CMake (Ubuntu)
-        if: matrix.os == 'ubuntu-24.04'
-        run: cmake -B build -DRAYX_WERROR=ON -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
-             -DRAYX_REQUIRE_CUDA=ON -DRAYX_REQUIRE_OPENMP=ON \
-             -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/install
+        if: matrix.label == 'ubuntu'
+        run: cmake -B build -DRAYX_WERROR=ON -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} -DRAYX_REQUIRE_CUDA=ON -DRAYX_REQUIRE_OPENMP=ON -DCMAKE_INSTALL_PREFIX=install
 
-      # ==========================================
-      # FEDORA BUILD (RPM + TGZ)
-      # ==========================================
+      # ------------------------------------------------------------------
+      # FEDORA SECTION (container-based)
+      # ------------------------------------------------------------------
+      - name: Install build deps (Fedora)
+        if: matrix.label == 'fedora'
+        run: |
+          dnf install -y git cmake gcc gcc-c++ make ninja-build \
+            dbus-devel gtk3-devel \
+            hdf5 hdf5-devel \
+            vulkan-loader vulkan-headers
+
       - name: Detect Fedora version
         if: matrix.label == 'fedora'
-        id: fedver
         run: |
-          echo "fedora_version=$(rpm -E %fedora)" >> $GITHUB_ENV
-
-      - name: Install dependencies (Fedora)
-        if: matrix.label == 'fedora'
-        run: |
-          dnf -y upgrade
-          dnf -y install cmake ninja-build gcc gcc-c++ \
-                         hdf5 hdf5-devel \
-                         xorg-x11-server-devel gtk3-devel dbus-devel
+          echo "FEDORA_VERSION=$(rpm -E %fedora)" >> $GITHUB_ENV
 
       - name: Configure CMake (Fedora)
         if: matrix.label == 'fedora'
-        run: |
-          cmake -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
-            -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/install \
-            -DHDF5_ROOT=/usr
+        run: cmake -B build -DRAYX_WERROR=ON -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} -DRAYX_REQUIRE_OPENMP=ON -DCMAKE_INSTALL_PREFIX=install
 
-      # ==========================================
-      # Build (all Linux + Windows)
-      # ==========================================
+      # ------------------------------------------------------------------
+      # COMMON BUILD + TEST
+      # ------------------------------------------------------------------
       - name: Build
         run: cmake --build build --config ${{ matrix.build-type }}
 
@@ -133,125 +131,119 @@ jobs:
         working-directory: build/bin/release
         run: ./rayx-core-tst -x
 
-      # ==========================================
-      # PACKAGING
-      # ==========================================
-
-      # Windows
+      # ------------------------------------------------------------------
+      # PACKAGING FOR WINDOWS
+      # ------------------------------------------------------------------
       - name: CPack (Windows - ZIP)
-        if: matrix.os == 'windows-2025'
+        if: matrix.label == 'windows'
         working-directory: build
         run: cpack -G ZIP
 
       - name: CPack (Windows - NSIS)
-        if: matrix.os == 'windows-2025'
+        if: matrix.label == 'windows'
         working-directory: build
         run: cpack -G NSIS
 
-      # Ubuntu — DEB + TGZ only
+      # ------------------------------------------------------------------
+      # PACKAGING FOR UBUNTU
+      # ------------------------------------------------------------------
       - name: CPack (Ubuntu - DEB)
-        if: matrix.os == 'ubuntu-24.04'
+        if: matrix.label == 'ubuntu'
         working-directory: build
         run: cpack -G DEB
 
-      - name: CPack (Ubuntu - TGZ)
-        if: matrix.os == 'ubuntu-24.04'
+      - name: CPack (Ubuntu - TAR)
+        if: matrix.label == 'ubuntu'
         working-directory: build
         run: cpack -G TGZ
 
-      # Fedora — RPM + TGZ with versioned filenames
-      - name: CPack (Fedora - RPM)
+      # ------------------------------------------------------------------
+      # PACKAGING FOR FEDORA
+      # ------------------------------------------------------------------
+      - name: Generate RPM and TGZ (Fedora)
         if: matrix.label == 'fedora'
         working-directory: build
         run: |
           cpack -G RPM
-          mv RAYX-*.rpm RAYX-fedora${{ env.fedora_version }}.rpm
-
-      - name: CPack (Fedora - TGZ)
-        if: matrix.label == 'fedora'
-        working-directory: build
-        run: |
           cpack -G TGZ
-          mv RAYX-*.tar.gz RAYX-fedora${{ env.fedora_version }}.tar.gz
+          # rename RPM to include fedora version
+          for f in RAYX-*.rpm; do
+            mv "$f" "${f%.rpm}.fedora${FEDORA_VERSION}.rpm"
+          done
 
-      # ==========================================
-      # ARTIFACT UPLOAD
-      # ==========================================
-
-      - name: Upload Windows artifacts
-        if: matrix.os == 'windows-2025'
+      # ------------------------------------------------------------------
+      # UPLOAD ARTIFACTS
+      # ------------------------------------------------------------------
+      - name: Upload artifacts (Windows)
+        if: matrix.label == 'windows'
         uses: actions/upload-artifact@v4
         with:
           name: windows-artifacts
           path: |
             build/RAYX-*.zip
             build/RAYX-*.exe
-          if-no-files-found: error
 
-      - name: Upload Ubuntu artifacts
-        if: matrix.os == 'ubuntu-24.04'
+      - name: Upload artifacts (Ubuntu)
+        if: matrix.label == 'ubuntu'
         uses: actions/upload-artifact@v4
         with:
           name: ubuntu-artifacts
           path: |
             build/RAYX-*.deb
             build/RAYX-*.tar.gz
-          if-no-files-found: error
 
-      - name: Upload Fedora artifacts
+      - name: Upload artifacts (Fedora)
         if: matrix.label == 'fedora'
         uses: actions/upload-artifact@v4
         with:
           name: fedora-artifacts
           path: |
-            build/RAYX-fedora*.rpm
-            build/RAYX-fedora*.tar.gz
-          if-no-files-found: error
+            build/RAYX-*.rpm
+            build/RAYX-*.tar.gz
 
-      # ==========================================
-      # VERSION + SOURCE ARCHIVE
-      # ==========================================
+      # ------------------------------------------------------------------
+      # SOURCE ZIP
+      # ------------------------------------------------------------------
       - name: Extract version from tag
         id: get_version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
 
       - name: Archive source code
-        run: git archive HEAD --format=zip --output=build/RAYX-source-v${{env.version}}.zip
+        run: |
+          git archive HEAD --format=zip --output=build/RAYX-source-v${{env.version}}.zip
 
-
-  # ==========================================
-  # RELEASE CREATION
-  # ==========================================
+  # --------------------------------------------------------------------
+  # RELEASE JOB
+  # --------------------------------------------------------------------
   release:
     name: Create Release
     needs: build-and-release
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
           sparse-checkout: CHANGELOG.md
 
-      - uses: actions/download-artifact@v4
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Extract version from tag
+      - name: Extract version
         id: get_version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
 
-      - name: Create and Upload Release
+      - name: Create Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
           body_path: CHANGELOG.md
           files: |
-            artifacts/windows-artifacts/*.zip
-            artifacts/windows-artifacts/*.exe
-            artifacts/ubuntu-artifacts/*.deb
-            artifacts/ubuntu-artifacts/*.tar.gz
-            artifacts/fedora-artifacts/*.rpm
-            artifacts/fedora-artifacts/*.tar.gz
-            artifacts/ubuntu-artifacts/RAYX-source-v${{env.version}}.zip
+            artifacts/windows-artifacts/*
+            artifacts/ubuntu-artifacts/*
+            artifacts/fedora-artifacts/*
+            artifacts/*/RAYX-source-v${{env.version}}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

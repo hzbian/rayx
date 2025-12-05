@@ -21,14 +21,6 @@ jobs:
 
     steps:
       # ------------------------------------------------------------------
-      # Standard checkout (works in bare Linux + Windows + Fedora container)
-      # ------------------------------------------------------------------
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      # ------------------------------------------------------------------
       # FEDORA SECTION (container-based)
       # ------------------------------------------------------------------
       - name: Install build deps (Fedora)
@@ -38,6 +30,14 @@ jobs:
             dbus-devel gtk3-devel \
             hdf5 hdf5-devel \
             vulkan-loader vulkan-headers
+
+      # ------------------------------------------------------------------
+      # Standard checkout (works in bare Linux + Windows + Fedora container)
+      # ------------------------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Detect Fedora version
         if: matrix.label == 'fedora'

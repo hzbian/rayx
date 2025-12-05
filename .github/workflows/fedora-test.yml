@@ -1,0 +1,32 @@
+name: Fedora Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fedora-test:
+    name: Fedora dnf Test
+    runs-on: ubuntu-latest
+
+    # Run inside a Fedora container
+    container: fedora:latest
+
+    steps:
+      - name: Show Fedora version
+        run: |
+          rpm -E %fedora
+          cat /etc/os-release
+
+      - name: Update package metadata
+        run: dnf makecache --refresh -y
+
+      - name: Install git with dnf
+        run: dnf install -y git
+
+      - name: Verify git works
+        run: |
+          git --version
+          which git
+
+      - name: Print success message
+        run: echo "Fedora container + dnf + git installation works!"

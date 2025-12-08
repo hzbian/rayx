@@ -123,10 +123,8 @@ jobs:
       # TEST — auto-detect binary (WORKS EVERYWHERE)
       # ---------------------------------------------------------
       - name: Test
-        working-directory: ${{ github.workspace }}
-        run: |
-          BIN=$(find build -type f -iname "rayx-core-tst*" | head -n 1)
-          "$BIN" -x
+        working-directory: build/bin/release
+        run: ./rayx-core-tst -x
 
 
       # ---------------------------------------------------------

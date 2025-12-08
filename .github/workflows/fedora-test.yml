@@ -123,18 +123,11 @@ jobs:
       # TEST — auto-detect binary (WORKS EVERYWHERE)
       # ---------------------------------------------------------
       - name: Test
+        working-directory: ${{ github.workspace }}
         run: |
-          echo "Searching for rayx-core-tst..."
           BIN=$(find build -type f -iname "rayx-core-tst*" | head -n 1)
-
-          if [ -z "$BIN" ]; then
-            echo "ERROR: Test binary not found!"
-            find build -maxdepth 4 -type f
-            exit 1
-          fi
-
-          echo "Running test: $BIN"
           "$BIN" -x
+
 
       # ---------------------------------------------------------
       # PACKAGING

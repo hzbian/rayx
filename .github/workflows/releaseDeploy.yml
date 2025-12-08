@@ -111,8 +111,7 @@ jobs:
         run: cmake --build ${{github.workspace}}/build --config ${{ matrix.build-type }}
 
       - name: Test
-        working-directory: ${{github.workspace}}/build/bin/release
-        run: ./rayx-core-tst -x
+        run: ${{ github.workspace }}/build/bin/rayx-core-tst -x
 
       # Generate Windows artifacts (ZIP and NSIS installer)
       - name: CPack (Windows - ZIP)
